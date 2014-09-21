@@ -1,6 +1,7 @@
 package com.bobamason.openglply;
 
 import android.opengl.*;
+
 import java.nio.*;
 import java.util.*;
 import java.io.*;
@@ -9,17 +10,102 @@ import android.os.*;
 import android.util.*;
 
 public class PLYModel {
+
+	private final String vertexShaderVertexColor = "uniform mat4 u_MVPMatrix;      \n"
+			+ "uniform mat4 u_MVMatrix;       \n"
+
+			+ "attribute vec4 a_Position;     \n"
+			+ "attribute vec3 a_Normal;       \n"
+			+ "attribute vec3 a_Color;       \n"
+
+			+ "varying vec3 v_Position;       \n"
+			+ "varying vec3 v_Color;          \n"
+			+ "varying vec3 v_Normal;         \n"
+			+ "void main()                                                \n"
+			+ "{                                                          \n"
+
+			+ "   v_Position = vec3(u_MVMatrix * a_Position);             \n"
+			+ "   v_Color = a_Color;             \n"
+
+			+ "   v_Normal = vec3(u_MVMatrix * vec4(a_Normal, 0.0));      \n"
+			+ "   gl_Position = u_MVPMatrix * a_Position;                 \n"
+			+ "}                                                          \n";
+
+	private final String fragmentShaderVertexColor = "precision mediump float;       \n"
+
+			+ "uniform vec3 u_LightPos;       \n"
+			+ "uniform float u_LightStrength;       \n"
+			+ "varying vec3 v_Position;		\n"
+			+ "varying vec3 v_Color;          \n"
+			+ "varying vec3 v_Normal;         \n"
+
+			+ "void main()                    \n"
+			+ "{                              \n"
+			+ "   float distance = length(u_LightPos - v_Position) / u_LightStrength;                   \n"
+			+ "   vec3 lightVector = normalize(u_LightPos - v_Position);             \n"
+
+			+ "   vec3 normal = v_Normal / length(v_Normal);             \n"
+
+			+ "   float diffuse = max(dot(normal, lightVector), 0.1);              \n"
+			+ "   diffuse = diffuse * (1.0 / (1.0 + (0.25 * distance * distance)));    \n"
+			+ "   gl_FragColor = vec4(v_Color, 1.0) * diffuse * 0.95 + vec4(v_Color, 1.0) * 0.05;                                  \n"
+			+ "}";
+
+	private final String vertexShaderTexture = "uniform mat4 u_MVPMatrix;      \n"
+			+ "uniform mat4 u_MVMatrix;       \n"
+
+			+ "attribute vec4 a_Position;     \n"
+			+ "attribute vec3 a_Normal;       \n"
+			+ "attribute vec2 a_TexCoordinate;  \n"
+
+			+ "varying vec3 v_Position;       \n"
+			+ "varying vec3 v_Normal;         \n"
+			+ "varying vec2 v_TexCoordinate;    \n"
+
+			+ "void main()                                                \n"
+			+ "{                                                          \n"
+
+			+ "   v_Position = vec3(u_MVMatrix * a_Position);             \n"
+			+ "   v_TexCoordinate = a_TexCoordinate; 					   \n"
+			+ "   v_Normal = vec3(u_MVMatrix * vec4(a_Normal, 0.0));      \n"
+			+ "   gl_Position = u_MVPMatrix * a_Position;                 \n"
+			+ "}                                                          \n";
+
+	private final String fragmentShaderTexture = "precision mediump float;       \n"
+
+			+ "uniform vec3 u_LightPos;       \n"
+			+ "uniform float u_LightStrength;       \n"
+			+ "uniform sampler2D u_Texture;   \n"
+
+			+ "varying vec3 v_Position;		\n"
+			+ "varying vec3 v_Normal;         \n"
+			+ "varying vec2 v_TexCoordinate;    \n"
+
+			+ "void main()                    \n"
+			+ "{                              \n"
+			+ "   float distance = length(u_LightPos - v_Position) / u_LightStrength;                   \n"
+			+ "   vec3 lightVector = normalize(u_LightPos - v_Position);             \n"
+
+			+ "   vec3 normal = v_Normal / length(v_Normal);             \n"
+
+			+ "   float diffuse = max(dot(normal, lightVector), 0.1);              \n"
+			+ "   diffuse = diffuse * (1.0 / (1.0 + (0.25 * distance * distance)));    \n"
+			+ "   gl_FragColor = diffuse * texture2D(u_Texture, v_TexCoordinate);                                  \n"
+			+ "}";
+
 	private FloatBuffer vertexBuffer;
-	
+
 	private ShortBuffer indicesBuffer;
 
 	static final int positionDataSize = 3;
 
 	static final int normalDataSize = 3;
-	
+
+	static final int textureDataSize = 2;
+
 	static final int colorDataSize = 3;
 
-	int vertexStride = 9 * 4;
+	int vertexStride;
 
 	private int mProgram;
 
@@ -28,8 +114,10 @@ public class PLYModel {
 	private int mColorHandle;
 
 	private final int mNormalOffset = 3;
-	
+
 	private final int mColorOffset = 6;
+
+	private final int mTextureOffset = 6;
 
 	private int mMVPMatrixHandle;
 
@@ -39,9 +127,9 @@ public class PLYModel {
 
 	private Context context;
 
-	private float[] minVals = {0f, 0f, 0f};
+	private float[] minVals = { 0f, 0f, 0f };
 
-	private float[] maxVals = {0f, 0f, 0f};
+	private float[] maxVals = { 0f, 0f, 0f };
 
 	private int mMVMatrixHandle;
 
@@ -64,16 +152,70 @@ public class PLYModel {
 	private float[] modelMatrix = new float[16];
 
 	private float lightStrength = 1f;
-	
+
 	private Vector3 currentTrans = new Vector3();
 
 	private short[] indices;
 
-	public PLYModel(Context ctx, String filename, int program, LoadStatusListener listener) {
+	private boolean hasTexture;
+
+	private int mTextureUniformHandle;
+
+	private int mTextureCoordinateHandle;
+
+	private int mTextureDataHandle;
+
+	public PLYModel(Context ctx, String filename, LoadStatusListener listener) {
+
+		int vertexShader = GLRenderer.loadGLShader(GLES20.GL_VERTEX_SHADER,
+				vertexShaderVertexColor);
+		int fragmentShader = GLRenderer.loadGLShader(GLES20.GL_FRAGMENT_SHADER,
+				fragmentShaderVertexColor);
+
+		GLRenderer.checkGLError("PLYModel load shaders");
+
+		mProgram = GLES20.glCreateProgram();
+		GLES20.glAttachShader(mProgram, vertexShader);
+		GLES20.glAttachShader(mProgram, fragmentShader);
+
+		GLES20.glLinkProgram(mProgram);
+
+		GLES20.glEnable(GLES20.GL_CULL_FACE);
+		GLES20.glEnable(GLES20.GL_DEPTH_TEST);
+		context = ctx;
+		hasTexture = false;
+		this.filename = filename;
+		mLoadStatusListener = listener;
+		new LoadModelTask().execute(filename);
+		setIdentity();
+	}
+
+	public PLYModel(Context ctx, String filename, int texID,
+			LoadStatusListener listener) {
+
+		int vertexShader = GLRenderer.loadGLShader(GLES20.GL_VERTEX_SHADER,
+				vertexShaderTexture);
+		int fragmentShader = GLRenderer.loadGLShader(GLES20.GL_FRAGMENT_SHADER,
+				fragmentShaderTexture);
+
+		GLRenderer.checkGLError("PLYModel load shaders");
+
+		mTextureDataHandle = GLRenderer.loadTexture(ctx, texID);
+
+		GLRenderer.checkGLError("PLYModel load texture");
+
+		mProgram = GLES20.glCreateProgram();
+		GLES20.glAttachShader(mProgram, vertexShader);
+		GLES20.glAttachShader(mProgram, fragmentShader);
+
+		GLES20.glLinkProgram(mProgram);
+
+		GLES20.glEnable(GLES20.GL_CULL_FACE);
+		GLES20.glEnable(GLES20.GL_DEPTH_TEST);
 
 		context = ctx;
+		hasTexture = true;
 		this.filename = filename;
-		mProgram = program;
 		mLoadStatusListener = listener;
 		new LoadModelTask().execute(filename);
 		setIdentity();
@@ -82,6 +224,7 @@ public class PLYModel {
 	public boolean isLoaded() {
 		return loaded;
 	}
+
 	public void setProjectionMatrix(float[] pMatrix) {
 		projectionMatrix = pMatrix;
 	}
@@ -95,49 +238,122 @@ public class PLYModel {
 			return;
 
 		GLES20.glUseProgram(mProgram);
+		GLRenderer.checkGLError("PLYModel use program");
 
-		mMVPMatrixHandle = GLES20.glGetUniformLocation(mProgram, "u_MVPMatrix");
-        mMVMatrixHandle = GLES20.glGetUniformLocation(mProgram, "u_MVMatrix"); 
-        mLightPosHandle = GLES20.glGetUniformLocation(mProgram, "u_LightPos");
-        mPositionHandle = GLES20.glGetAttribLocation(mProgram, "a_Position");
-        mColorHandle = GLES20.glGetAttribLocation(mProgram, "a_Color");
-        mNormalHandle = GLES20.glGetAttribLocation(mProgram, "a_Normal"); 
-        mLightStrengthHandle = GLES20.glGetUniformLocation(mProgram, "u_LightStrength");
+		if (hasTexture) {
+			mTextureUniformHandle = GLES20.glGetUniformLocation(mProgram,
+					"u_Texture");
+			GLRenderer.checkGLError("PLYModel mTextureUniformHandle");
+			mTextureCoordinateHandle = GLES20.glGetAttribLocation(mProgram,
+					"a_TexCoordinate");
+			GLRenderer.checkGLError("PLYModel mTextureCoordinateHandle");
+			mMVPMatrixHandle = GLES20.glGetUniformLocation(mProgram,
+					"u_MVPMatrix");
+			GLRenderer.checkGLError("PLYModel mMVPMatrixHandle");
+			mMVMatrixHandle = GLES20.glGetUniformLocation(mProgram,
+					"u_MVMatrix");
+			GLRenderer.checkGLError("PLYModel mMVMatrixHandle");
+			mLightPosHandle = GLES20.glGetUniformLocation(mProgram,
+					"u_LightPos");
+			GLRenderer.checkGLError("PLYModel link mLightPosHandle");
+			mPositionHandle = GLES20
+					.glGetAttribLocation(mProgram, "a_Position");
+			GLRenderer.checkGLError("PLYModel mPositionHandle");
+			mNormalHandle = GLES20.glGetAttribLocation(mProgram, "a_Normal");
+			GLRenderer.checkGLError("PLYModel mNormalHandle");
+			mLightStrengthHandle = GLES20.glGetUniformLocation(mProgram,
+					"u_LightStrength");
+			GLRenderer.checkGLError("PLYModel mLightStrengthHandle");
 
+			GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
 
-		vertexBuffer.position(0);
-		GLES20.glVertexAttribPointer(mPositionHandle, positionDataSize, 
-									 GLES20.GL_FLOAT, false, 
-									 vertexStride, vertexBuffer);
-		GLES20.glEnableVertexAttribArray(mPositionHandle);
+			GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, mTextureDataHandle);
 
-		vertexBuffer.position(mNormalOffset);
-		GLES20.glVertexAttribPointer(mNormalHandle, normalDataSize, 
-									 GLES20.GL_FLOAT, false, 
-									 vertexStride, vertexBuffer);
-		GLES20.glEnableVertexAttribArray(mNormalHandle);
+			GLES20.glUniform1i(mTextureUniformHandle, 0);
 
-		vertexBuffer.position(mColorOffset);
-		GLES20.glVertexAttribPointer(mColorHandle, colorDataSize, 
-									 GLES20.GL_FLOAT, false, 
-									 vertexStride, vertexBuffer);
-		GLES20.glEnableVertexAttribArray(mColorHandle);
+			vertexBuffer.position(0);
+			GLES20.glVertexAttribPointer(mPositionHandle, positionDataSize,
+					GLES20.GL_FLOAT, false, vertexStride, vertexBuffer);
+			GLES20.glEnableVertexAttribArray(mPositionHandle);
 
-		GLES20.glUniform3f(mLightPosHandle, lightPos[0], lightPos[1], lightPos[2]);
-		GLES20.glUniform1f(mLightStrengthHandle, lightStrength);
+			vertexBuffer.position(mNormalOffset);
+			GLES20.glVertexAttribPointer(mNormalHandle, normalDataSize,
+					GLES20.GL_FLOAT, false, vertexStride, vertexBuffer);
+			GLES20.glEnableVertexAttribArray(mNormalHandle);
 
-		Matrix.multiplyMM(mvMatrix, 0, viewMatrix, 0, modelMatrix, 0);
+			vertexBuffer.position(mTextureOffset);
+			GLES20.glVertexAttribPointer(mTextureCoordinateHandle,
+					textureDataSize, GLES20.GL_FLOAT, false, vertexStride,
+					vertexBuffer);
+			GLES20.glEnableVertexAttribArray(mTextureCoordinateHandle);
 
-		GLES20.glUniformMatrix4fv(mMVMatrixHandle, 1, false, mvMatrix, 0);
+			GLES20.glUniform3f(mLightPosHandle, lightPos[0], lightPos[1],
+					lightPos[2]);
+			GLES20.glUniform1f(mLightStrengthHandle, lightStrength);
+			Matrix.multiplyMM(mvMatrix, 0, viewMatrix, 0, modelMatrix, 0);
+			GLES20.glUniformMatrix4fv(mMVMatrixHandle, 1, false, mvMatrix, 0);
+			Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, mvMatrix, 0);
+			GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mvpMatrix, 0);
 
-		Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, mvMatrix, 0);
-		GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mvpMatrix, 0);
-		
-		GLES20.glDrawElements(GLES20.GL_TRIANGLES, indices.length, GLES20.GL_UNSIGNED_SHORT, indicesBuffer);
-		
-		GLES20.glDisableVertexAttribArray(mPositionHandle);
-		GLES20.glDisableVertexAttribArray(mNormalHandle);
-		GLES20.glDisableVertexAttribArray(mColorHandle);
+			GLES20.glDrawElements(GLES20.GL_TRIANGLES, indices.length,
+					GLES20.GL_UNSIGNED_SHORT, indicesBuffer);
+
+			GLES20.glDisableVertexAttribArray(mPositionHandle);
+			GLES20.glDisableVertexAttribArray(mNormalHandle);
+			GLES20.glDisableVertexAttribArray(mTextureCoordinateHandle);
+		} else {
+			mMVPMatrixHandle = GLES20.glGetUniformLocation(mProgram,
+					"u_MVPMatrix");
+			GLRenderer.checkGLError("PLYModel mMVPMatrixHandle");
+			mMVMatrixHandle = GLES20.glGetUniformLocation(mProgram,
+					"u_MVMatrix");
+			GLRenderer.checkGLError("PLYModel mMVMatrixHandle");
+			mLightPosHandle = GLES20.glGetUniformLocation(mProgram,
+					"u_LightPos");
+			GLRenderer.checkGLError("PLYModel mLightStrengthHandle");
+			mPositionHandle = GLES20
+					.glGetAttribLocation(mProgram, "a_Position");
+			GLRenderer.checkGLError("PLYModel mPositionHandle");
+			mColorHandle = GLES20.glGetAttribLocation(mProgram, "a_Color");
+			GLRenderer.checkGLError("PLYModel mColorHandle");
+			mNormalHandle = GLES20.glGetAttribLocation(mProgram, "a_Normal");
+			GLRenderer.checkGLError("PLYModel mNormalHandle");
+			mLightStrengthHandle = GLES20.glGetUniformLocation(mProgram,
+					"u_LightStrength");
+			GLRenderer.checkGLError("PLYModel mLightStrengthHandle");
+
+			vertexBuffer.position(0);
+			GLES20.glVertexAttribPointer(mPositionHandle, positionDataSize,
+					GLES20.GL_FLOAT, false, vertexStride, vertexBuffer);
+			GLES20.glEnableVertexAttribArray(mPositionHandle);
+
+			vertexBuffer.position(mNormalOffset);
+			GLES20.glVertexAttribPointer(mNormalHandle, normalDataSize,
+					GLES20.GL_FLOAT, false, vertexStride, vertexBuffer);
+			GLES20.glEnableVertexAttribArray(mNormalHandle);
+
+			vertexBuffer.position(mColorOffset);
+			GLES20.glVertexAttribPointer(mColorHandle, colorDataSize,
+					GLES20.GL_FLOAT, false, vertexStride, vertexBuffer);
+			GLES20.glEnableVertexAttribArray(mColorHandle);
+
+			GLES20.glUniform3f(mLightPosHandle, lightPos[0], lightPos[1],
+					lightPos[2]);
+			GLES20.glUniform1f(mLightStrengthHandle, lightStrength);
+			Matrix.multiplyMM(mvMatrix, 0, viewMatrix, 0, modelMatrix, 0);
+			GLES20.glUniformMatrix4fv(mMVMatrixHandle, 1, false, mvMatrix, 0);
+			Matrix.multiplyMM(mvpMatrix, 0, projectionMatrix, 0, mvMatrix, 0);
+			GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mvpMatrix, 0);
+
+			GLES20.glDrawElements(GLES20.GL_TRIANGLES, indices.length,
+					GLES20.GL_UNSIGNED_SHORT, indicesBuffer);
+
+			GLES20.glDisableVertexAttribArray(mPositionHandle);
+			GLES20.glDisableVertexAttribArray(mNormalHandle);
+			GLES20.glDisableVertexAttribArray(mColorHandle);
+		}
+
+		GLRenderer.checkGLError("Draw PLYModel");
 	}
 
 	private boolean loadModel(String filename) {
@@ -149,95 +365,103 @@ public class PLYModel {
 		boolean isOk = false;
 		ArrayList<String> header = new ArrayList<String>();
 
-		try
-		{
+		try {
 			stream = context.getAssets().open(filename);
 			reader = new BufferedReader(new InputStreamReader(stream));
 
 			String line = reader.readLine();
 
-			while (line != null && !line.contains("end_header"))
-			{
+			while (line != null && !line.contains("end_header")) {
 				header.add(line);
 				line = reader.readLine();
 			}
 
-			for (i = 0; i < header.size(); i++)
-			{
+			for (i = 0; i < header.size(); i++) {
 				line = header.get(i);
-				if (line.contains("element vertex"))
-				{
+				if (line.contains("element vertex")) {
 					int p = line.lastIndexOf(" ") + 1;
-					try
-					{
+					try {
 						vCount = Integer.parseInt(line.substring(p));
-						vertices = new float[vCount * 9];
-						Log.d("PLYModel" , "vertex count from file: " + vCount);
-					}
-					catch (NumberFormatException e)
-					{
+						Log.d("PLYModel", "vertex count from file: " + vCount);
+					} catch (NumberFormatException e) {
 						e.printStackTrace();
 					}
 				}
 
-				if (line.contains("element face"))
-				{
+				if (line.contains("element face")) {
 					int p = line.lastIndexOf(" ") + 1;
-					try
-					{
+					try {
 						fCount = Integer.parseInt(line.substring(p));
-						indices = new short[fCount * 3];
-						Log.d("PLYModel" , "face count from file: " + fCount);
-					}
-					catch (NumberFormatException e)
-					{
+						Log.d("PLYModel", "face count from file: " + fCount);
+					} catch (NumberFormatException e) {
 						e.printStackTrace();
 					}
 				}
 			}
 
-			for(i = 0; i < vCount; i++){
+			if (hasTexture) {
+				vertexStride = 8 * 4;
+				vertices = new float[vCount * 8];
+				for (i = 0; i < vCount; i++) {
+					line = reader.readLine();
+					if (line != null) {
+						String[] split = line.split(" ");
+						for (j = 0; j < split.length; j++) {
+							try {
+								vertices[i * 8 + j] = Float
+										.parseFloat(split[j]);
+							} catch (NumberFormatException e) {
+								e.printStackTrace();
+							}
+						}
+					}
+				}
+			} else {
+				vertexStride = 9 * 4;
+				vertices = new float[vCount * 9];
+				for (i = 0; i < vCount; i++) {
+					line = reader.readLine();
+					if (line != null) {
+						String[] split = line.split(" ");
+						for (j = 0; j < split.length; j++) {
+							try {
+								if (j >= 6) {
+									vertices[i * 9 + j] = Float
+											.parseFloat(split[j]) / 255f;
+								} else {
+									vertices[i * 9 + j] = Float
+											.parseFloat(split[j]);
+								}
+							} catch (NumberFormatException e) {
+								e.printStackTrace();
+							}
+						}
+					}
+				}
+			}
+			indices = new short[fCount * 3];
+
+			for (i = 0; i < fCount; i++) {
 				line = reader.readLine();
-				if(line != null){
+				if (line != null) {
 					String[] split = line.split(" ");
-					for(j = 0; j < split.length; j ++){
-						try{
-							if(j >= 6){
-								vertices[i * 9 + j] = Float.parseFloat(split[j])/255f;
-							}
-							else{
-								vertices[i * 9 + j] = Float.parseFloat(split[j]);
-							}
-						}catch(NumberFormatException e){
+					for (j = 1; j < split.length; j++) {
+						try {
+							indices[i * 3 + (j - 1)] = Short
+									.parseShort(split[j]);
+						} catch (NumberFormatException e) {
 							e.printStackTrace();
 						}
 					}
 				}
 			}
 
-			for(i = 0; i < fCount; i++){
-				line = reader.readLine();
-				if(line != null){
-					String[] split = line.split(" ");
-					for(j = 1; j < split.length; j ++){
-						try{
-							indices[i * 3 + (j - 1)] = Short.parseShort(split[j]);
-						}catch(NumberFormatException e){
-							e.printStackTrace();
-						}
-					}
-				}
-			}
-
-			if (stream != null)
-			{
+			if (stream != null) {
 				stream.close();
 			}
 
 			isOk = true;
-		}
-		catch (IOException e)
-		{
+		} catch (IOException e) {
 			e.printStackTrace();
 		}
 
@@ -247,19 +471,22 @@ public class PLYModel {
 	public float getWidth() {
 		if (loaded)
 			return maxVals[0] - minVals[0];
-		else return 0;
+		else
+			return 0;
 	}
 
 	public float getHeight() {
 		if (loaded)
 			return maxVals[1] - minVals[1];
-		else return 0;
+		else
+			return 0;
 	}
 
 	public float getDepth() {
 		if (loaded)
 			return maxVals[2] - minVals[2];
-		else return 0;
+		else
+			return 0;
 	}
 
 	public float getLargestDimen() {
@@ -281,12 +508,12 @@ public class PLYModel {
 	}
 
 	public void setIdentity() {
-		currentTrans.set(0f,0f,0f);
+		currentTrans.set(0f, 0f, 0f);
 		Matrix.setIdentityM(modelMatrix, 0);
 	}
 
 	public void translate(float x, float y, float z) {
-		currentTrans.add(x,y,z);
+		currentTrans.add(x, y, z);
 		Matrix.translateM(modelMatrix, 0, x, y, z);
 	}
 
@@ -314,7 +541,8 @@ public class PLYModel {
 	}
 
 	public void getCenter(float[] vec4) {
-		if (vec4.length != 4) throw new IllegalArgumentException("array must have lenght of 3");
+		if (vec4.length != 4)
+			throw new IllegalArgumentException("array must have lenght of 3");
 		if (loaded) {
 			vec4[0] = (maxVals[0] + minVals[0]) / 2f;
 			vec4[1] = (maxVals[1] + minVals[1]) / 2f;
@@ -328,15 +556,14 @@ public class PLYModel {
 		}
 	}
 
-
 	public Vector3 getCenterVec() {
-		if (loaded){
+		if (loaded) {
 			Vector3 v = new Vector3((maxVals[0] + minVals[0]) / 2f,
-								(maxVals[1] + minVals[1]) / 2f,
-								(maxVals[2] + minVals[2]) / 2f);
+					(maxVals[1] + minVals[1]) / 2f,
+					(maxVals[2] + minVals[2]) / 2f);
 			v.add(currentTrans);
 			return v;
-		}else
+		} else
 			return new Vector3();
 	}
 
@@ -344,7 +571,8 @@ public class PLYModel {
 
 		@Override
 		protected void onPreExecute() {
-			if (mLoadStatusListener != null) mLoadStatusListener.started();
+			if (mLoadStatusListener != null)
+				mLoadStatusListener.started();
 		}
 
 		@Override
@@ -362,20 +590,22 @@ public class PLYModel {
 			bb.order(ByteOrder.nativeOrder());
 
 			vertexBuffer = bb.asFloatBuffer();
-			vertexBuffer.put(vertices);	
+			vertexBuffer.put(vertices);
 			vertexBuffer.position(0);
-			
+
 			ByteBuffer ib = ByteBuffer.allocateDirect(indices.length * 2);
 			ib.order(ByteOrder.nativeOrder());
-			
+
 			indicesBuffer = ib.asShortBuffer();
 			indicesBuffer.put(indices);
 			indicesBuffer.position(0);
 
 			loaded = result;
-			Log.d("PLYModel", "loaded = " + String.valueOf(loaded) + " " + filename);
+			Log.d("PLYModel", "loaded = " + String.valueOf(loaded) + " "
+					+ filename);
 
-			if (mLoadStatusListener != null) mLoadStatusListener.completed();
+			if (mLoadStatusListener != null)
+				mLoadStatusListener.completed();
 			System.gc();
 		}
 	}

@@ -1,4 +1,5 @@
 package com.bobamason.openglply;
+
 import android.opengl.*;
 import android.util.*;
 import java.nio.*;
@@ -18,7 +19,7 @@ public class LoadingAnimation {
 
 	private float s = 0.3f;
 
-	private float deg2rad = (float)Math.PI / 180f;
+	private float deg2rad = (float) Math.PI / 180f;
 
 	private static final int numTriangles = 8;
 
@@ -36,9 +37,9 @@ public class LoadingAnimation {
 
 	private static final long duration = 200;
 
-	private float[] c1 = {0.7f, 0.7f, 0.7f, 1f};
+	private float[] c1 = { 0.7f, 0.7f, 0.7f, 1f };
 
-	private float[] c2 = {1f, 1f, 1f, 1f};
+	private float[] c2 = { 1f, 1f, 1f, 1f };
 
 	private float[] color = new float[4];
 
@@ -60,23 +61,25 @@ public class LoadingAnimation {
 	}
 
 	public void draw() {
-		Matrix.setLookAtM(viewMatrix, 0, 0.0f, 0.0f, -1.0f, 0f, 0f, 0f, 0f, 1f, 0f);
+		Matrix.setLookAtM(viewMatrix, 0, 0.0f, 0.0f, -1.0f, 0f, 0f, 0f, 0f, 1f,
+				0f);
 
 		GLES20.glDisable(GLES20.GL_CULL_FACE);
 		GLES20.glDisable(GLES20.GL_DEPTH_TEST);
 		currentMillis = System.currentTimeMillis();
 
 		for (int i = 0; i < numTriangles; i++) {
-			x = (float)Math.cos(i * angleStep * deg2rad) * 0.4f;
-			y = (float)Math.sin(i * angleStep * deg2rad) * 0.4f;
+			x = (float) Math.cos(i * angleStep * deg2rad) * 0.4f;
+			y = (float) Math.sin(i * angleStep * deg2rad) * 0.4f;
 			Matrix.setIdentityM(modelMatrix, 0);
 			Matrix.translateM(modelMatrix, 0, x, y, 1f);
 			Matrix.rotateM(modelMatrix, 0, i * angleStep, 0f, 0f, 1f);
 
 			if (currentMillis - lastMillis < duration) {
 				if (i == num) {
-					mScale = 1f + (0.8f / duration) * (int)(currentMillis - lastMillis);
-					//Matrix.rotateM(modelMatrix, 0, mScale, 1f, -1f, 0f);
+					mScale = 1f + (0.8f / duration)
+							* (int) (currentMillis - lastMillis);
+					// Matrix.rotateM(modelMatrix, 0, mScale, 1f, -1f, 0f);
 					Matrix.scaleM(modelMatrix, 0, mScale, mScale, mScale);
 					color = c2;
 				} else {
@@ -102,26 +105,19 @@ public class LoadingAnimation {
 	private class Triangle {
 		private FloatBuffer vertexBuffer;
 
-		private final String vertexShaderCode = 
-		"uniform mat4 uMVPMatrix;" +
-		"attribute vec4 vPosition;" +
-		"void main(){" +
-		"gl_Position = uMVPMatrix * vPosition;" +
-		"}";
+		private final String vertexShaderCode = "uniform mat4 uMVPMatrix;"
+				+ "attribute vec4 vPosition;" + "void main(){"
+				+ "gl_Position = uMVPMatrix * vPosition;" + "}";
 
-		private final String fragmentShaderCode = 
-		"precision mediump float;" +
-		"uniform vec4 vColor;" +
-		"void main(){" +
-		"gl_FragColor = vColor;" +
-		"}";
+		private final String fragmentShaderCode = "precision mediump float;"
+				+ "uniform vec4 vColor;" + "void main(){"
+				+ "gl_FragColor = vColor;" + "}";
 
 		static final int C0ORDS_PER_VERTEX = 3;
 
-		static final float[] triangleCoords = {
-			-0.5f, 0.5f, 0.0f, //top
-			0.5f, -0.5f, 0.0f, //bottom right
-			0.5f, 0.5f, 0.0f // bottom left
+		final float[] triangleCoords = { -0.5f, 0.5f, 0.0f, // top
+				0.5f, -0.5f, 0.0f, // bottom right
+				0.5f, 0.5f, 0.0f // bottom left
 		};
 
 		int vertexCount = triangleCoords.length / C0ORDS_PER_VERTEX;
@@ -137,7 +133,8 @@ public class LoadingAnimation {
 		private int mMVPMatrixHandle;
 
 		public Triangle() {
-			ByteBuffer bb = ByteBuffer.allocateDirect(triangleCoords.length * 4);
+			ByteBuffer bb = ByteBuffer
+					.allocateDirect(triangleCoords.length * 4);
 			bb.order(ByteOrder.nativeOrder());
 
 			vertexBuffer = bb.asFloatBuffer();
@@ -147,8 +144,10 @@ public class LoadingAnimation {
 			Log.d("triangle buffer", vertexBuffer.capacity() + "");
 			Log.d("triangle stride", vertexStride + "");
 
-			int vertexShader = GLRenderer.loadShader(GLES20.GL_VERTEX_SHADER, vertexShaderCode);
-			int fragmentShader = GLRenderer.loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShaderCode);
+			int vertexShader = GLRenderer.loadGLShader(GLES20.GL_VERTEX_SHADER,
+					vertexShaderCode);
+			int fragmentShader = GLRenderer.loadGLShader(
+					GLES20.GL_FRAGMENT_SHADER, fragmentShaderCode);
 
 			mProgram = GLES20.glCreateProgram();
 			GLES20.glAttachShader(mProgram, vertexShader);
@@ -163,15 +162,15 @@ public class LoadingAnimation {
 
 			GLES20.glEnableVertexAttribArray(mPositionHandle);
 
-			GLES20.glVertexAttribPointer(mPositionHandle, C0ORDS_PER_VERTEX, 
-										 GLES20.GL_FLOAT, false, 
-										 vertexStride, vertexBuffer);
+			GLES20.glVertexAttribPointer(mPositionHandle, C0ORDS_PER_VERTEX,
+					GLES20.GL_FLOAT, false, vertexStride, vertexBuffer);
 
 			mColorHandle = GLES20.glGetUniformLocation(mProgram, "vColor");
 
 			GLES20.glUniform4fv(mColorHandle, 1, color, 0);
 
-			mMVPMatrixHandle = GLES20.glGetUniformLocation(mProgram, "uMVPMatrix");
+			mMVPMatrixHandle = GLES20.glGetUniformLocation(mProgram,
+					"uMVPMatrix");
 
 			GLES20.glUniformMatrix4fv(mMVPMatrixHandle, 1, false, mvpMatrix, 0);
 
